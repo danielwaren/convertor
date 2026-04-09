@@ -1,0 +1,11 @@
+---
+import Base from "../layouts/Base.astro";
+import WebpConverter from "../components/WebpConverter.tsx";
+---
+
+<Base
+  title="WebP Convert — Conversor gratuito de imágenes a WebP sin publicidad"
+  description="Convierte JPG y PNG a WebP gratis, sin publicidad y sin subir archivos a servidores. Procesamiento 100% en tu navegador. 10 conversiones/día gratis con cuenta."
+>
+  <WebpConverter client:load />
+</Base>

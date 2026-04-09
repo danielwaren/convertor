@@ -1,0 +1,24 @@
+---
+import Base from "../../layouts/Base.astro";
+import WebpConverter from "../../components/WebpConverter.tsx";
+---
+
+<Base
+  title="Convertir PNG a WebP gratis — WebP Convert"
+  description="Convierte tus imágenes PNG a WebP gratis y sin publicidad. Hasta 80% menos de peso sin pérdida visual apreciable. Sin subir archivos al servidor."
+>
+  <WebpConverter client:load />
+
+  <section class="max-w-2xl mx-auto px-4 py-16 font-sans">
+    <h2 class="text-2xl font-bold text-white mb-4">¿Por qué convertir PNG a WebP?</h2>
+    <p class="text-zinc-400 text-sm leading-relaxed mb-4">
+      El formato PNG es conocido por su alta calidad pero sus archivos son pesados.
+      Convertir a <strong class="text-zinc-200">WebP</strong> puede reducir el peso hasta un 80% manteniendo
+      una calidad visual prácticamente idéntica, lo que hace tu sitio web significativamente más rápido.
+    </p>
+    <p class="text-zinc-400 text-sm leading-relaxed">
+      WebP fue diseñado por Google específicamente para la web moderna.
+      Es el formato recomendado por Lighthouse, PageSpeed Insights y todos los auditores de rendimiento web en 2026.
+    </p>
+  </section>
+</Base>
