@@ -310,7 +310,7 @@ export default function WebpConverter() {
           Convierte a <span className="text-emerald-400">WebP</span><br />sin publicidad
         </h1>
         <p className="text-zinc-400 text-base leading-relaxed max-w-lg mx-auto">
-          JPG, PNG, GIF y más → WebP optimizado para web.
+          JPG, PNG, GIF y más → WebP optimizadoooo para web.
           {!user && " 10 conversiones gratis al día con cuenta. Sin tarjeta."}
         </p>
       </div>
