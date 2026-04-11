@@ -63,6 +63,8 @@ export default function WebpConverter() {
   const [settings, setSettings] = useState<ConversionSettings>(DEFAULT_SETTINGS);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [result, setResult] = useState<ConvertedImage | null>(null);
   const [customName, setCustomName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -71,19 +73,25 @@ export default function WebpConverter() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Auth listener
+  // ─── Auth ─────────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") {
+        setUser(session?.user ?? null);
+      }
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        setUsage(null);
+      }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Fetch usage whenever user changes
-  useEffect(() => {
-    fetchUsage();
-  }, [user]);
+  useEffect(() => { fetchUsage(); }, [user]);
 
   async function fetchUsage() {
     const authHeader = await getAuthHeader();
@@ -125,9 +133,7 @@ export default function WebpConverter() {
         headers: { Authorization: authHeader },
       });
       const data = await res.json();
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-      }
+      if (data.checkout_url) window.location.href = data.checkout_url;
     } catch {
       setError("No se pudo iniciar el pago. Intenta de nuevo.");
     } finally {
@@ -135,42 +141,20 @@ export default function WebpConverter() {
     }
   }
 
+  // ─── Conversión canvas (sin gastar token) ────────────────────────────────
+
   const convertToWebP = useCallback(async (file: File) => {
     if (!file.type.match(/^image\/(jpeg|jpg|png|webp|gif|bmp|tiff)$/i)) {
       setError("Formato no soportado. Usa JPG, PNG, WebP, GIF, BMP o TIFF.");
       return;
     }
-
-    // Verificar límite antes de convertir
-    const authHeader = await getAuthHeader();
-    const checkRes = await fetch("/api/conversions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(authHeader ? { Authorization: authHeader } : {}),
-      },
-      body: JSON.stringify({ action: "increment" }),
-    });
-
-    if (checkRes.status === 429) {
-      const data = await checkRes.json();
-      setError(
-        data.plan === "anonymous"
-          ? "Límite diario alcanzado. Crea una cuenta gratis para obtener 10 conversiones/día."
-          : "Límite diario alcanzado. Actualiza a Pro para conversiones ilimitadas."
-      );
-      return;
-    }
-
     setIsConverting(true);
     setError(null);
     setResult(null);
-
     try {
       const originalSize = file.size;
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
-
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error("No se pudo cargar la imagen."));
@@ -204,7 +188,6 @@ export default function WebpConverter() {
       const baseName = file.name.replace(/\.[^/.]+$/, "");
       setCustomName(baseName);
       setResult({ blob, url: URL.createObjectURL(blob), originalSize, convertedSize: blob.size, width, height });
-      await fetchUsage();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido.");
     } finally {
@@ -213,7 +196,6 @@ export default function WebpConverter() {
   }, [settings]);
 
   const handleFile = (file: File) => convertToWebP(file);
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -221,32 +203,124 @@ export default function WebpConverter() {
     if (file) handleFile(file);
   };
 
-  const handleDownload = () => {
+  // ─── Descarga con modal ───────────────────────────────────────────────────
+
+  function handleDownloadClick() {
     if (!result) return;
-    const name = (customName.trim() || "imagen").replace(/[^a-zA-Z0-9_\-áéíóúñÁÉÍÓÚÑ ]/g, "_");
-    const a = document.createElement("a");
-    a.href = result.url;
-    a.download = `${name}.webp`;
-    a.click();
-  };
+    setIsConfirming(true);
+  }
+
+  async function handleConfirmDownload() {
+    if (!result) return;
+    setIsDownloading(true);
+    try {
+      const authHeader = await getAuthHeader();
+      const res = await fetch("/api/conversions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        body: JSON.stringify({ action: "increment" }),
+      });
+
+      if (res.status === 429) {
+        const data = await res.json();
+        setIsConfirming(false);
+        setError(
+          data.plan === "anonymous"
+            ? "Límite diario alcanzado. Crea una cuenta gratis para obtener 10 conversiones/día."
+            : "Límite diario alcanzado. Actualiza a Pro para más conversiones."
+        );
+        return;
+      }
+
+      const name = (customName.trim() || "imagen").replace(/[^a-zA-Z0-9_\-áéíóúñÁÉÍÓÚÑ ]/g, "_");
+      const a = document.createElement("a");
+      a.href = result.url;
+      a.download = `${name}.webp`;
+      a.click();
+      setResult(null);
+      setCustomName("");
+      setError(null);
+      setIsConfirming(false);
+      await fetchUsage(); // actualiza contador en nav
+    } catch {
+      setError("Error al procesar la descarga. Intenta de nuevo.");
+      setIsConfirming(false);
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  // ─── Computed ─────────────────────────────────────────────────────────────
 
   const savingsPct = result
     ? Math.round(((result.originalSize - result.convertedSize) / result.originalSize) * 100)
     : 0;
 
-  const limitLabel = usage
-    ? usage.plan === "pro"
-      ? "∞ ilimitadas"
-      : usage.limit === Infinity
-      ? "∞"
-      : `${usage.used} / ${usage.limit} hoy`
-    : "—";
+  const tokensLeft = usage ? Math.max(0, usage.limit - usage.used) : null;
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-mono">
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* ── Modal confirmación ── */}
+      {isConfirming && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+        >
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg">
+                ↓
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">Confirmar descarga</p>
+                <p className="text-xs text-zinc-500">Se gastará 1 token de conversión</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-800 rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
+              <span className="text-xs text-zinc-400">Tokens disponibles hoy</span>
+              {usage ? (
+                <span className={`text-sm font-bold font-mono ${
+                  tokensLeft === 0 ? "text-red-400" :
+                  tokensLeft !== null && tokensLeft <= 2 ? "text-yellow-400" : "text-emerald-400"
+                }`}>
+                  {tokensLeft} / {usage.limit}
+                </span>
+              ) : (
+                <span className="text-xs text-zinc-500">—</span>
+              )}
+            </div>
+
+            <p className="text-xs text-zinc-500 mb-5 text-center font-mono truncate">
+              {(customName.trim() || "imagen")}.webp · {result && formatBytes(result.convertedSize)}
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsConfirming(false)}
+                disabled={isDownloading}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm py-2.5 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmDownload}
+                disabled={isDownloading}
+                className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-sm py-2.5 rounded-xl transition-colors"
+              >
+                {isDownloading ? "Descargando..." : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Nav ── */}
       <nav className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between max-w-5xl mx-auto">
@@ -255,16 +329,36 @@ export default function WebpConverter() {
           <span className="text-emerald-400 text-xl font-bold">Convert</span>
         </div>
 
-        <div className="flex items-center gap-4">
-          {usage && (
-            <span className="text-xs text-zinc-500 hidden sm:block">
-              {usage.plan === "pro" && <span className="text-emerald-400 font-bold mr-1">PRO</span>}
-              {limitLabel}
-            </span>
-          )}
-
+        <div className="flex items-center gap-3">
           {user ? (
-            <div className="flex items-center gap-3">
+            <>
+              {/* Nickname + badge PRO */}
+              <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                <span className="text-xs text-zinc-300 font-mono">
+                  {user.email?.split("@")[0]}
+                </span>
+                {usage?.plan === "pro" && (
+                  <span className="text-[10px] bg-emerald-500 text-zinc-950 font-bold px-1.5 py-0.5 rounded">
+                    PRO
+                  </span>
+                )}
+              </div>
+
+              {/* Contador conversiones */}
+              {usage && (
+                <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-zinc-500">hoy</span>
+                  <span className={`text-xs font-bold font-mono ${
+                    usage.used >= usage.limit ? "text-red-400" :
+                    tokensLeft !== null && tokensLeft <= 2 ? "text-yellow-400" : "text-emerald-400"
+                  }`}>
+                    {usage.used}/{usage.limit}
+                  </span>
+                </div>
+              )}
+
+              {/* Botón Pro */}
               {usage?.plan !== "pro" && (
                 <button
                   onClick={handleUpgradeToPro}
@@ -274,13 +368,14 @@ export default function WebpConverter() {
                   {isLoadingCheckout ? "..." : "↑ Pro $5/mes"}
                 </button>
               )}
+
               <button
                 onClick={signOut}
                 className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 Salir
               </button>
-            </div>
+            </>
           ) : (
             <div className="flex items-center gap-2">
               <button
@@ -310,7 +405,7 @@ export default function WebpConverter() {
           Convierte a <span className="text-emerald-400">WebP</span><br />sin publicidad
         </h1>
         <p className="text-zinc-400 text-base leading-relaxed max-w-lg mx-auto">
-          JPG, PNG, GIF y más → WebP optimizadoooo para web.
+          JPG, PNG, GIF y más → WebP optimizado para web.
           {!user && " 10 conversiones gratis al día con cuenta. Sin tarjeta."}
         </p>
       </div>
@@ -334,17 +429,11 @@ export default function WebpConverter() {
               </div>
             </div>
             {usage.plan === "free" ? (
-              <button
-                onClick={handleUpgradeToPro}
-                className="text-xs text-emerald-400 hover:text-emerald-300 whitespace-nowrap transition-colors"
-              >
+              <button onClick={handleUpgradeToPro} className="text-xs text-emerald-400 hover:text-emerald-300 whitespace-nowrap transition-colors">
                 Pro ilimitado →
               </button>
             ) : (
-              <button
-                onClick={signInWithGoogle}
-                className="text-xs text-emerald-400 hover:text-emerald-300 whitespace-nowrap transition-colors"
-              >
+              <button onClick={signInWithGoogle} className="text-xs text-emerald-400 hover:text-emerald-300 whitespace-nowrap transition-colors">
                 Crear cuenta →
               </button>
             )}
@@ -397,8 +486,7 @@ export default function WebpConverter() {
         {/* Error */}
         {error && (
           <div className="mt-4 bg-red-950/50 border border-red-800 rounded-xl px-4 py-3 text-sm text-red-400 flex gap-2">
-            <span>⚠</span>
-            <span>{error}</span>
+            <span>⚠</span><span>{error}</span>
           </div>
         )}
 
@@ -427,7 +515,6 @@ export default function WebpConverter() {
               {result.width} × {result.height}px · calidad {settings.quality}%
             </div>
 
-            {/* Nombre de archivo */}
             <div className="px-4 pt-3 pb-2 border-t border-zinc-800">
               <label className="text-[11px] text-zinc-500 uppercase tracking-wider block mb-1.5">
                 Nombre del archivo
@@ -448,7 +535,7 @@ export default function WebpConverter() {
 
             <div className="px-4 pb-4 pt-2 flex gap-3">
               <button
-                onClick={handleDownload}
+                onClick={handleDownloadClick}
                 className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-sm py-2.5 px-4 rounded-lg transition-colors"
               >
                 ↓ Descargar {(customName.trim() || "imagen")}.webp
@@ -549,7 +636,6 @@ export default function WebpConverter() {
         <h2 className="text-2xl font-bold text-center mb-2">Precios</h2>
         <p className="text-zinc-500 text-sm text-center mb-10">Sin sorpresas. Cancela cuando quieras.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Free */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
             <p className="text-sm text-zinc-400 mb-1">Gratis</p>
             <p className="text-3xl font-bold text-white mb-4">$0 <span className="text-base font-normal text-zinc-500">/siempre</span></p>
@@ -567,7 +653,6 @@ export default function WebpConverter() {
               Crear cuenta gratis
             </button>
           </div>
-          {/* Pro */}
           <div className="bg-zinc-900 border-2 border-emerald-500/50 rounded-xl p-6 relative">
             <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-zinc-950 text-xs font-bold px-3 py-1 rounded-full">
               MÁS POPULAR
@@ -575,7 +660,7 @@ export default function WebpConverter() {
             <p className="text-sm text-emerald-400 mb-1">Pro</p>
             <p className="text-3xl font-bold text-white mb-4">$5 <span className="text-base font-normal text-zinc-500">/mes USD</span></p>
             <ul className="space-y-2 text-sm text-zinc-400">
-              {["Conversiones ilimitadas", "Todo lo del plan Free", "Soporte prioritario", "Cancela cuando quieras"].map((f) => (
+              {["200 conversiones por día", "Todo lo del plan Free", "Soporte prioritario", "Cancela cuando quieras"].map((f) => (
                 <li key={f} className="flex items-center gap-2">
                   <span className="text-emerald-500 text-xs">✓</span> {f}
                 </li>
@@ -592,7 +677,7 @@ export default function WebpConverter() {
         </div>
       </section>
 
-      {/* ── FAQ SEO ── */}
+      {/* ── FAQ ── */}
       <section className="max-w-2xl mx-auto px-4 pb-24">
         <h2 className="text-2xl font-bold mb-8 text-center">Preguntas frecuentes</h2>
         <div className="space-y-4">

@@ -1,10 +1,13 @@
 import { Redis } from "@upstash/redis";
-const redis = Redis.fromEnv();
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL ?? import.meta.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN ?? import.meta.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 const LIMITS = {
   anonymous: 3,
   free: 10,
-  pro: Infinity,
+  pro: 150,
 } as const;
 
 type PlanKey = keyof typeof LIMITS;

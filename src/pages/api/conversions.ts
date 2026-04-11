@@ -3,6 +3,8 @@ import { checkLimit, incrementConversions } from "../../lib/ratelimit";
 import { supabase, getUserProfile } from "../../lib/supabase";
 
 export const POST: APIRoute = async ({ request, clientAddress }) => {
+  console.log("UPSTASH URL:", import.meta.env.UPSTASH_REDIS_REST_URL);
+  console.log("UPSTASH TOKEN:", import.meta.env.UPSTASH_REDIS_REST_TOKEN ? "existe" : "undefined")
   try {
     const body = await request.json().catch(() => ({}));
     const { action } = body as { action?: "check" | "increment" };

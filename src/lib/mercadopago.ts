@@ -1,17 +1,14 @@
-import MercadoPago, { Preference } from "mercadopago";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const isTest = import.meta.env.MODE !== "production";
 
-const mp = new MercadoPago({
-  accessToken: isTest
-    ? import.meta.env.MP_ACCESS_TOKEN_TEST
-    : import.meta.env.MP_ACCESS_TOKEN,
+const client = new MercadoPagoConfig({
+  accessToken: import.meta.env.MP_ACCESS_TOKEN_TEST,
 });
-
 const SITE_URL = import.meta.env.PUBLIC_SITE_URL;
 
 export async function createProCheckout(userId: string, userEmail: string) {
-  const preference = new Preference(mp);
+  const preference = new Preference(client);
 
   const response = await preference.create({
     body: {
@@ -19,7 +16,7 @@ export async function createProCheckout(userId: string, userEmail: string) {
         {
           id: "pro-monthly",
           title: "WebP Convert Pro — 1 mes",
-          description: "Conversiones ilimitadas por 30 días",
+          description: "200 conversiones diarias por 30 días",
           quantity: 1,
           unit_price: 5,
           currency_id: "USD",
@@ -36,7 +33,6 @@ export async function createProCheckout(userId: string, userEmail: string) {
       },
       auto_return: "approved",
       notification_url: `${SITE_URL}/api/mp-webhook`,
-      expires: false,
     },
   });
 
