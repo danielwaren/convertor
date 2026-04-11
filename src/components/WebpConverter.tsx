@@ -110,11 +110,23 @@ export default function WebpConverter() {
   }
 
   async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.href } });
+  await supabase.auth.signInWithOAuth({ 
+    provider: "google", 
+    options: { 
+      redirectTo: "https://convertidor-five.vercel.app",
+      skipBrowserRedirect: false,
+    } 
+  });
   }
 
   async function signInWithGitHub() {
-    await supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: window.location.href } });
+    await supabase.auth.signInWithOAuth({ 
+      provider: "github", 
+      options: { 
+        redirectTo: "https://convertidor-five.vercel.app",
+        skipBrowserRedirect: false,
+      } 
+    });
   }
 
   async function signOut() {
